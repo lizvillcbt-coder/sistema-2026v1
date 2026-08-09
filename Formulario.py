@@ -12,12 +12,39 @@ import streamlit as st
 # CONFIGURACIÓN INICIAL DE LA PÁGINA
 # ==========================================
 st.set_page_config(
-    page_title="Sistema de Inscripción 2026", page_icon="📝", layout="wide"
+    page_title="Sistema de Inscripción / Reinscripción 2026",
+    page_icon="📝",
+    layout="wide",
 )
 
 PASSWORD_ADMIN = st.secrets.get("PASSWORD_ADMIN", "admin123")
 DB_FILE = "inscripciones.db"
-PLANTILLA_EXCEL = "SOLIC INSCRIP NVO 2026.xlsx"
+
+# Mapeo de archivos de plantillas según el semestre
+PLANTILLAS_EXCEL = {
+    "1ER SEMESTRE": "SOLIC INSCRIP NVO 2026.xlsx",
+    "3ER SEMESTRE": "SOLICITUD REINSCRIPCION tercero.xlsx",
+    "5TO SEMESTRE": "SOLICITUD REINSCRIPCION quinto.xlsx",
+}
+
+# DICCIONARIOS DE DOCUMENTOS SEGÚN EL SEMESTRE
+DOCS_OPCIONES_1ER = {
+    "1": "1.- Voucher de Pago Original",
+    "2": "2.- Comprobante de Asignación / Folio",
+    "3": "3.- Certificado de Secundaria",
+    "4": "4.- Boleta de 3er Año",
+    "5": "5.- CURP Alumno",
+    "6": "6.- Acta de Nacimiento",
+    "7": "7.- Certificado Médico",
+    "8": "8.- Comprobante Domicilio",
+    "9": "9.- INE Tutor",
+    "10": "10.- CURP Tutor",
+    "11": "11.- 3 Fotografías Infantil",
+}
+
+DOCS_OPCIONES_REINSCRIPCION = {
+    "1": "1.- Voucher de Pago Original",
+}
 
 
 # ==========================================
@@ -25,7 +52,7 @@ PLANTILLA_EXCEL = "SOLIC INSCRIP NVO 2026.xlsx"
 # ==========================================
 @st.cache_resource
 def get_db_connection():
-    """Mantiene una conexión persistente y segura para hilos a SQLite."""
+    """Mantiene una conexión persistente a SQLite."""
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     return conn
 
@@ -34,11 +61,13 @@ def inicializar_db():
     """Crea la tabla de alumnos si no existe en la BBDD local."""
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # Se agrega la columna semestre
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS alumnos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha_registro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            nombre_alumno TEXT, curp TEXT UNIQUE, fecha_nacimiento TEXT, edad TEXT,
+            semestre TEXT, nombre_alumno TEXT, curp TEXT UNIQUE, fecha_nacimiento TEXT, edad TEXT,
             sexo TEXT, lugar_nacimiento TEXT, celular_alumno TEXT, correo TEXT,
             red_social TEXT, secundaria TEXT, cct TEXT, promedio TEXT, carrera TEXT,
             turno TEXT, estatus TEXT, observaciones TEXT, nombre_tutor TEXT,
@@ -48,6 +77,13 @@ def inicializar_db():
         )
     """)
     conn.commit()
+
+    # Migración suave en caso de que la tabla ya existiera sin la columna 'semestre'
+    try:
+        cursor.execute("ALTER TABLE alumnos ADD COLUMN semestre TEXT")
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass  # Ya existe la columna
 
 
 def vaciar_db():
@@ -64,12 +100,12 @@ def guardar_en_db(datos):
     cursor.execute(
         """
         INSERT INTO alumnos (
-            nombre_alumno, curp, fecha_nacimiento, edad, sexo, lugar_nacimiento,
+            semestre, nombre_alumno, curp, fecha_nacimiento, edad, sexo, lugar_nacimiento,
             celular_alumno, correo, red_social, secundaria, cct, promedio,
             carrera, turno, estatus, observaciones, nombre_tutor, domicilio,
             dom_diferente, segundo_domicilio, celular_tutor, tel_casa, tel_emergencia,
             ocupacion, docs_entregados
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """,
         datos,
     )
@@ -82,7 +118,7 @@ def actualizar_en_db(id_alumno, datos):
     cursor.execute(
         """
         UPDATE alumnos SET
-            nombre_alumno=?, curp=?, fecha_nacimiento=?, edad=?, sexo=?, lugar_nacimiento=?,
+            semestre=?, nombre_alumno=?, curp=?, fecha_nacimiento=?, edad=?, sexo=?, lugar_nacimiento=?,
             celular_alumno=?, correo=?, red_social=?, secundaria=?, cct=?, promedio=?,
             carrera=?, turno=?, estatus=?, observaciones=?, nombre_tutor=?, domicilio=?,
             dom_diferente=?, segundo_domicilio=?, celular_tutor=?, tel_casa=?, tel_emergencia=?,
@@ -129,6 +165,7 @@ def escribir_celda_segura(sheet, celda, valor, alineacion=None, fuente=None):
 # FUNCIÓN PARA GENERAR EXCEL RELLENADO
 # ==========================================
 def generar_excel_alumno(
+    semestre,
     nombre_alumno,
     dia_nac,
     mes_nac,
@@ -157,26 +194,29 @@ def generar_excel_alumno(
     ocupacion,
     docs_list,
 ):
-    """Rellena la plantilla Excel con los datos del alumno y aplica las fuentes/formatos requeridos."""
-    if not os.path.exists(PLANTILLA_EXCEL):
+    """Selecciona la plantilla según el semestre y llena los datos del alumno."""
+    plantilla_target = PLANTILLAS_EXCEL.get(
+        semestre, PLANTILLAS_EXCEL["1ER SEMESTRE"]
+    )
+
+    if not os.path.exists(plantilla_target):
         return None
 
-    wb = openpyxl.load_workbook(PLANTILLA_EXCEL)
+    wb = openpyxl.load_workbook(plantilla_target)
     sheet = wb.active
 
-    # --- AJUSTES DE IMPRESIÓN EXACTOS ---
+    # --- AJUSTES DE IMPRESIÓN ---
     sheet.page_setup.orientation = sheet.ORIENTATION_PORTRAIT
     sheet.page_setup.paperSize = sheet.PAPERSIZE_LETTER
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.page_setup.fitToWidth = 1
     sheet.page_setup.fitToHeight = 1
 
-    # Línea 25 (D25 a V25) con Arial 10
+    # Formatos de texto
     font_arial_10_bold = Font(name="Arial", size=10, bold=True)
     if sheet["D25"].value:
         sheet["D25"].font = font_arial_10_bold
 
-    # Línea 31 (A31 a V31) con Arial 9
     font_arial_9_bold = Font(name="Arial", size=9, bold=True)
     if sheet["A31"].value:
         sheet["A31"].font = font_arial_9_bold
@@ -210,7 +250,7 @@ def generar_excel_alumno(
     elif turno == "VESPERTINO":
         escribir_celda_segura(sheet, "M18", "X")
 
-    # Mapeo del Resultado (Mapea 'FOLIO DE ASIGNACIÓN' o 'ASIGNADO' a D19)
+    # Mapeo de Resultado
     map_estatus = {
         "FOLIO DE ASIGNACIÓN": "D19",
         "ASIGNADO": "D19",
@@ -225,7 +265,7 @@ def generar_excel_alumno(
     escribir_celda_segura(sheet, "G22", nombre_tutor)
     escribir_celda_segura(sheet, "H24", domicilio)
 
-    # --- MANEJO DE FILA 26: 2DO DOMICILIO O NOTA POR DEFECTO ---
+    # --- FILA 26: 2DO DOMICILIO O NOTA POR DEFECTO ---
     if dom_diferente and segundo_domicilio.strip():
         texto_f26 = f"2DO DOMICILIO TUTOR: {segundo_domicilio.strip()}"
         font_f26 = Font(name="Arial", size=8, bold=True)
@@ -246,26 +286,31 @@ def generar_excel_alumno(
     escribir_celda_segura(sheet, "I29", tel_emergencia)
     escribir_celda_segura(sheet, "I30", ocupacion)
 
-    # Mapeo de casillas de documentos entregados (del 1 al 11)
-    cell_docs_map = {
-        "1": "J32",
-        "2": "J33",
-        "3": "J34",
-        "4": "J35",
-        "5": "J36",
-        "6": "J37",
-        "7": "J38",
-        "8": "V32",
-        "9": "V34",
-        "10": "V36",
-        "11": "V37",
-    }
+    # --- MAPEO DE DOCUMENTOS ENTREGADOS ---
+    if semestre == "1ER SEMESTRE":
+        cell_docs_map = {
+            "1": "J32",
+            "2": "J33",
+            "3": "J34",
+            "4": "J35",
+            "5": "J36",
+            "6": "J37",
+            "7": "J38",
+            "8": "V32",
+            "9": "V34",
+            "10": "V36",
+            "11": "V37",
+        }
+    else:
+        # En 3ro y 5to de reinscripción solo hay Voucher (Casilla J32)
+        cell_docs_map = {"1": "J32"}
+
     for doc_num in docs_list:
         doc_num_str = str(doc_num).strip()
         if doc_num_str in cell_docs_map:
             escribir_celda_segura(sheet, cell_docs_map[doc_num_str], "X")
 
-    # --- FECHA EN FILA 41 ---
+    # --- FECHA EN FILA 35 (Reinscripciones) o FILA 41/35 (Según plantilla) ---
     hoy = datetime.date.today()
     meses_es = [
         "ENERO",
@@ -289,9 +334,10 @@ def generar_excel_alumno(
         horizontal="center", vertical="center", wrap_text=False
     )
 
+    celda_fecha = "A41" if semestre == "1ER SEMESTRE" else "A35"
     escribir_celda_segura(
         sheet,
-        "A41",
+        celda_fecha,
         texto_fecha_completa,
         alineacion=alineacion_centrada,
         fuente=fuente_original,
@@ -303,34 +349,26 @@ def generar_excel_alumno(
     return excel_buffer.getvalue()
 
 
-# Inicializar la base de datos al iniciar el programa
+# Inicializar base de datos
 inicializar_db()
-
-# DICCIONARIO OFICIAL DE DOCUMENTOS
-DOCS_OPCIONES = {
-    "1": "1.- Voucher de Pago Original",
-    "2": "2.- Comprobante de Asignación / Folio",
-    "3": "3.- Certificado de Secundaria",
-    "4": "4.- Boleta de 3er Año",
-    "5": "5.- CURP Alumno",
-    "6": "6.- Acta de Nacimiento",
-    "7": "7.- Certificado Médico",
-    "8": "8.- Comprobante Domicilio",
-    "9": "9.- INE Tutor",
-    "10": "10.- CURP Tutor",
-    "11": "11.- 3 Fotografías Infantil",
-}
 
 # ==========================================
 # INTERFAZ Y NAVEGACIÓN DE STREAMLIT
 # ==========================================
 tab1, tab2 = st.tabs(["📝 Formulario de Inscripción", "🔒 Panel Administrador"])
 
-# --- TAB 1: FORMULARIO DE INSCRIPCIÓN ---
+# --- TAB 1: FORMULARIO DE INSCRIPCIÓN / REINSCRIPCIÓN ---
 with tab1:
-    st.title("📝 Solicitud de Inscripción 2026")
+    st.title("📝 Solicitud de Inscripción / Reinscripción 2026")
 
-    # --- BLOQUE 1: DATOS PERSONALES Y ACADÉMICOS ---
+    # SELECCIÓN DE SEMESTRE AL INICIO
+    semestre_sel = st.selectbox(
+        "🎓 Selecciona el Semestre al que te inscribes/reinscribes:",
+        ["1ER SEMESTRE", "3ER SEMESTRE", "5TO SEMESTRE"],
+        key="f_semestre",
+    )
+
+    st.markdown("---")
     st.header("1. Datos Personales del Alumno")
     nombre_alumno = st.text_input("Nombre completo del Alumno:", key="f_nombre")
 
@@ -356,7 +394,7 @@ with tab1:
     st.header("2. Datos Académicos")
     col_a1, col_a2 = st.columns(2)
     curp = col_a1.text_input("CURP del Alumno:", key="f_curp")
-    promedio = col_a2.text_input("Promedio de Secundaria:", key="f_promedio")
+    promedio = col_a2.text_input("Promedio:", key="f_promedio")
 
     secundaria = st.text_input("Secundaria de procedencia:", key="f_secundaria")
     cct = st.text_input("CCT de la Secundaria:", key="f_cct")
@@ -366,7 +404,6 @@ with tab1:
     turno = col_t1.radio(
         "Turno:", ["MATUTINO", "VESPERTINO"], horizontal=True, key="f_turno"
     )
-    # AQUÍ ESTÁ EL CAMBIO: "FOLIO DE ASIGNACIÓN" en lugar de "ASIGNADO"
     estatus = col_t2.radio(
         "Resultado:",
         ["FOLIO DE ASIGNACIÓN", "CAMBIO", "OTRO RESULTADO", "SIN PROCESO"],
@@ -375,7 +412,6 @@ with tab1:
     )
     observaciones = st.text_input("Observaciones:", key="f_obs")
 
-    # --- BLOQUE 2: DATOS DEL TUTOR ---
     st.header("3. Datos del Tutor")
     nombre_tutor = st.text_input("Nombre completo del Tutor:", key="f_tutor")
     domicilio = st.text_input(
@@ -408,7 +444,6 @@ with tab1:
     tel_emergencia = col_tut3.text_input("Teléfono de Emergencia:", key="f_telemerg")
     ocupacion = st.text_input("Ocupación del Tutor:", key="f_ocupacion")
 
-    # --- BLOQUE 3: BOTÓN DE ENVÍO DE FORMULARIO ---
     st.markdown("---")
     if st.button("💾 GUARDAR SOLICITUD LOCALMENTE", use_container_width=True, type="primary"):
         if not nombre_alumno or not curp:
@@ -419,11 +454,10 @@ with tab1:
                 mes_nac = f"{fecha_nac.month:02d}"
                 anio_nac = str(fecha_nac.year)
 
-                # Quedan vacíos por defecto hasta que el admin los marque
                 lista_docs_vacia = ""
 
-                # Guardar en SQLite
                 datos_alumno = (
+                    semestre_sel,
                     nombre_alumno,
                     curp,
                     f"{dia_nac}/{mes_nac}/{anio_nac}",
@@ -453,11 +487,11 @@ with tab1:
                 guardar_en_db(datos_alumno)
 
                 st.success(
-                    "✅ ¡Inscripción guardada correctamente! La entrega de documentos se revisará en Control Escolar."
+                    f"✅ ¡Solicitud para **{semestre_sel}** guardada correctamente!"
                 )
 
-                # Generar Excel
                 bytes_excel = generar_excel_alumno(
+                    semestre_sel,
                     nombre_alumno,
                     dia_nac,
                     mes_nac,
@@ -492,9 +526,9 @@ with tab1:
                         c for c in nombre_alumno if c.isalnum() or c == " "
                     ).strip()
                     st.download_button(
-                        label="📄 Descargar Solicitud en Excel (.xlsx)",
+                        label=f"📄 Descargar Solicitud en Excel ({semestre_sel})",
                         data=bytes_excel,
-                        file_name=f"SOLICITUD_{nombre_limpio}_{curp}.xlsx",
+                        file_name=f"SOLICITUD_{semestre_sel.replace(' ', '_')}_{nombre_limpio}_{curp}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     )
 
@@ -513,9 +547,6 @@ with tab2:
         with st.expander(
             "📤 Cargar / Reemplazar Base de Datos (.db)", expanded=False
         ):
-            st.info(
-                "Sube una copia previa de tu archivo `inscripciones.db` para consultar o actualizar los datos."
-            )
             uploaded_db = st.file_uploader(
                 "Selecciona un archivo .db local:", type=["db"]
             )
@@ -524,9 +555,7 @@ with tab2:
                     with open(DB_FILE, "wb") as f:
                         f.write(uploaded_db.getbuffer())
                     st.cache_resource.clear()
-                    st.success(
-                        "✅ Base de datos cargada y actualizada con éxito."
-                    )
+                    st.success("✅ Base de datos cargada y actualizada con éxito.")
                     st.rerun()
 
         st.markdown("---")
@@ -564,30 +593,37 @@ with tab2:
         st.subheader("📋 Cotejo de Documentos Entregados (Control Escolar)")
         if not df_alumnos.empty:
             map_alumnos_docs = {
-                f"{r['nombre_alumno']} - CURP: {r['curp']}": r
+                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} - CURP: {r['curp']}": r
                 for _, r in df_alumnos.iterrows()
             }
             sel_alum_doc = st.selectbox(
                 "Selecciona el alumno para cotejar/actualizar sus documentos:",
                 list(map_alumnos_docs.keys()),
-                key="sb_alum_docs"
+                key="sb_alum_docs",
             )
             r_doc_sel = map_alumnos_docs[sel_alum_doc]
-            
+
+            semestre_alumno = r_doc_sel.get("semestre", "1ER SEMESTRE") or "1ER SEMESTRE"
+            docs_opciones_target = (
+                DOCS_OPCIONES_1ER
+                if semestre_alumno == "1ER SEMESTRE"
+                else DOCS_OPCIONES_REINSCRIPCION
+            )
+
             docs_actuales_str = str(r_doc_sel["docs_entregados"] or "")
             docs_actuales = [d.strip() for d in docs_actuales_str.split(",") if d.strip()]
 
-            st.write("Selecciona los documentos físicos recibidos:")
-            
+            st.write(f"Documentos requeridos para **{semestre_alumno}**:")
+
             col_doc_a, col_doc_b = st.columns(2)
             nuevos_docs_seleccionados = []
 
-            for num_k, txt_v in DOCS_OPCIONES.items():
+            for num_k, txt_v in docs_opciones_target.items():
                 col_target = col_doc_a if int(num_k) <= 7 else col_doc_b
                 marcado = col_target.checkbox(
                     txt_v,
                     value=(num_k in docs_actuales),
-                    key=f"chk_doc_{r_doc_sel['id']}_{num_k}"
+                    key=f"chk_doc_{r_doc_sel['id']}_{num_k}",
                 )
                 if marcado:
                     nuevos_docs_seleccionados.append(num_k)
@@ -596,7 +632,9 @@ with tab2:
                 nuevos_docs_seleccionados.sort(key=int)
                 cadena_actualizada = ",".join(nuevos_docs_seleccionados)
                 actualizar_docs_en_db(r_doc_sel["id"], cadena_actualizada)
-                st.success(f"✅ Documentos actualizados correctamente para **{r_doc_sel['nombre_alumno']}**.")
+                st.success(
+                    f"✅ Documentos actualizados para **{r_doc_sel['nombre_alumno']}**."
+                )
                 st.rerun()
 
         st.markdown("---")
@@ -605,12 +643,12 @@ with tab2:
         # ==========================================
         st.subheader("📦 Descarga Masiva o Individual de Solicitudes en Excel")
         if not df_alumnos.empty:
-            
+
             opciones_alumnos_map = {
-                f"{r['nombre_alumno']} - CURP: {r['curp']}": r
+                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} - CURP: {r['curp']}": r
                 for _, r in df_alumnos.iterrows()
             }
-            
+
             lista_etiquetas = list(opciones_alumnos_map.keys())
 
             col_btn_a, col_btn_b = st.columns(2)
@@ -622,20 +660,22 @@ with tab2:
             seleccionados = st.multiselect(
                 "Selecciona uno o varios alumnos para empaquetar sus archivos Excel:",
                 options=lista_etiquetas,
-                key="alumnos_seleccionados"
+                key="alumnos_seleccionados",
             )
 
             if seleccionados:
                 col_info, col_dl = st.columns([2, 1])
                 col_info.info(f"📋 **{len(seleccionados)}** alumno(s) seleccionado(s).")
-                
+
                 if col_dl.button("📦 Generar Paquete ZIP con Excels"):
                     zip_buffer = BytesIO()
-                    
-                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+
+                    with zipfile.ZipFile(
+                        zip_buffer, "w", zipfile.ZIP_DEFLATED
+                    ) as zip_file:
                         for etq in seleccionados:
                             r_al = opciones_alumnos_map[etq]
-                            
+
                             fnac_parts = (
                                 str(r_al["fecha_nacimiento"]).split("/")
                                 if r_al["fecha_nacimiento"]
@@ -651,7 +691,12 @@ with tab2:
                                 else []
                             )
 
+                            sem_alumno = (
+                                r_al.get("semestre", "1ER SEMESTRE") or "1ER SEMESTRE"
+                            )
+
                             bytes_excel_ind = generar_excel_alumno(
+                                sem_alumno,
                                 r_al["nombre_alumno"],
                                 d_nac,
                                 m_nac,
@@ -685,26 +730,23 @@ with tab2:
                                 nom_clean = "".join(
                                     c for c in r_al["nombre_alumno"] if c.isalnum() or c == " "
                                 ).strip()
-                                nombre_archivo_excel = f"SOLICITUD_{nom_clean}_{r_al['curp']}.xlsx"
-                                zip_file.writestr(nombre_archivo_excel, bytes_excel_ind)
+                                nombre_archivo_excel = f"SOLICITUD_{sem_alumno.replace(' ', '_')}_{nom_clean}_{r_al['curp']}.xlsx"
+                                zip_file.writestr(
+                                    nombre_archivo_excel, bytes_excel_ind
+                                )
 
                     zip_buffer.seek(0)
-                    
+
                     st.download_button(
                         label="⬇️ DESCARGAR ARCHIVO ZIP DE SOLICITUDES",
                         data=zip_buffer.getvalue(),
                         file_name=f"SOLICITUDES_EXCEL_{datetime.date.today().strftime('%Y%m%d')}.zip",
                         mime="application/zip",
-                        use_container_width=True
+                        use_container_width=True,
                     )
 
         with st.expander("⚠️ Opción Temporal: Vaciar / Eliminar Base de Datos"):
-            st.warning(
-                "Esta acción borrará TODOS los registros de la base de datos local."
-            )
-            confirmar_vaciar = st.checkbox(
-                "Entiendo que esta acción es irreversible"
-            )
+            confirmar_vaciar = st.checkbox("Entiendo que esta acción es irreversible")
             if st.button("🗑️ VACIAR BASE DE DATOS AHORA") and confirmar_vaciar:
                 vaciar_db()
                 st.success("✅ Base de datos vaciada con éxito.")
@@ -715,12 +757,12 @@ with tab2:
 
         st.markdown("---")
         # ==========================================
-        # SECCIÓN 3: EDITAR EDICIÓN COMPLETA DE CAMPOS
+        # SECCIÓN 3: EDITAR COMPLETO EN BBDD
         # ==========================================
         st.subheader("✏️ Editar Cualquier Campo de un Alumno Registrado")
         if not df_alumnos.empty:
             opciones = {
-                f"{r['nombre_alumno']} (CURP: {r['curp']})": r["id"]
+                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} (CURP: {r['curp']})": r["id"]
                 for _, r in df_alumnos.iterrows()
             }
             sel_alumno = st.selectbox(
@@ -730,11 +772,15 @@ with tab2:
             row_sel = df_alumnos[df_alumnos["id"] == id_sel].iloc[0]
 
             with st.form("form_edit_admin_completo"):
-                st.markdown("##### Datos del Alumno")
-                col_e1, col_e2 = st.columns(2)
-                e_nombre = col_e1.text_input(
-                    "Nombre:", value=row_sel["nombre_alumno"]
-                )
+                st.markdown("##### Datos Principales")
+                col_esem, col_e1, col_e2 = st.columns(3)
+                
+                opt_semestres = ["1ER SEMESTRE", "3ER SEMESTRE", "5TO SEMESTRE"]
+                val_sem = row_sel.get("semestre", "1ER SEMESTRE") or "1ER SEMESTRE"
+                idx_sem = opt_semestres.index(val_sem) if val_sem in opt_semestres else 0
+                
+                e_semestre = col_esem.selectbox("Semestre:", opt_semestres, index=idx_sem)
+                e_nombre = col_e1.text_input("Nombre:", value=row_sel["nombre_alumno"])
                 e_curp = col_e2.text_input("CURP:", value=row_sel["curp"])
 
                 col_e3, col_e4, col_e5 = st.columns(3)
@@ -742,9 +788,7 @@ with tab2:
                     "Fecha Nac. (DD/MM/AAAA):",
                     value=str(row_sel["fecha_nacimiento"] or ""),
                 )
-                e_edad = col_e4.text_input(
-                    "Edad:", value=str(row_sel["edad"] or "")
-                )
+                e_edad = col_e4.text_input("Edad:", value=str(row_sel["edad"] or ""))
                 e_sexo = col_e5.selectbox(
                     "Sexo:",
                     ["FEMENINO", "MASCULINO"],
@@ -773,9 +817,7 @@ with tab2:
                 e_secundaria = col_ea1.text_input(
                     "Secundaria:", value=str(row_sel["secundaria"] or "")
                 )
-                e_cct = col_ea2.text_input(
-                    "CCT:", value=str(row_sel["cct"] or "")
-                )
+                e_cct = col_ea2.text_input("CCT:", value=str(row_sel["cct"] or ""))
                 e_promedio = col_ea3.text_input(
                     "Promedio:", value=str(row_sel["promedio"] or "")
                 )
@@ -791,9 +833,7 @@ with tab2:
                     if row_sel["turno"] in opt_turno
                     else 0
                 )
-                e_turno = col_ea5.selectbox(
-                    "Turno:", opt_turno, index=idx_turno
-                )
+                e_turno = col_ea5.selectbox("Turno:", opt_turno, index=idx_turno)
 
                 opt_estatus = [
                     "FOLIO DE ASIGNACIÓN",
@@ -841,7 +881,7 @@ with tab2:
                 e_tel_casa = col_et4.text_input(
                     "Tel. Casa:", value=str(row_sel["tel_casa"] or "")
                 )
-                e_tel_emerg = col_et5.text_input(
+                e_tel_emerg = col_et6.text_input(
                     "Tel. Emergencia:",
                     value=str(row_sel["tel_emergencia"] or ""),
                 )
@@ -860,6 +900,7 @@ with tab2:
 
             if btn_actualizar_todo:
                 datos_actualizados = (
+                    e_semestre,
                     e_nombre,
                     e_curp,
                     e_fnac,
