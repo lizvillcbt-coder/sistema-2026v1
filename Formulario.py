@@ -164,6 +164,14 @@ def vaciar_db():
     conn.commit()
 
 
+def eliminar_alumno_db(id_alumno):
+    """Elimina un solo alumno por su ID de la BBDD."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM alumnos WHERE id = ?", (id_alumno,))
+    conn.commit()
+
+
 def guardar_en_db(datos):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -736,7 +744,7 @@ with tab2:
 
         st.markdown("---")
         # ==========================================
-        # SECCIÓN 2: DESCARGA MULTIPLE EN EXCEL AGUPADA POR SEMESTRE (.ZIP)
+        # SECCIÓN 2: DESCARGA MÚLTIPLE EN EXCEL AGRUPADA POR SEMESTRE (.ZIP)
         # ==========================================
         st.subheader("📦 Descarga Masiva o Individual de Solicitudes en Excel")
         if not df_alumnos.empty:
@@ -825,10 +833,7 @@ with tab2:
                                 nom_clean = "".join(
                                     c for c in r_al["nombre_alumno"] if c.isalnum() or c == " "
                                 ).strip()
-                                # Nombre de archivo indivual
                                 nom_archivo = f"SOLICITUD_{sem_alumno.replace(' ', '_')}_{nom_clean}_{r_al['curp']}.xlsx"
-                                
-                                # Ruta dentro del ZIP agrupada en carpeta por semestre
                                 ruta_dentro_zip = f"{sem_alumno}/{nom_archivo}"
                                 
                                 zip_file.writestr(ruta_dentro_zip, bytes_excel_ind)
@@ -843,9 +848,36 @@ with tab2:
                         use_container_width=True,
                     )
 
-        with st.expander("⚠️ Opción Temporal: Vaciar / Eliminar Base de Datos"):
-            confirmar_vaciar = st.checkbox("Entiendo que esta acción es irreversible")
-            if st.button("🗑️ VACIAR BASE DE DATOS AHORA") and confirmar_vaciar:
+        # ==========================================
+        # SECCIÓN 3: ELIMINAR UN ALUMNO
+        # ==========================================
+        st.markdown("---")
+        st.subheader("🗑️ Eliminar un Alumno Específico")
+        if not df_alumnos.empty:
+            map_eliminar = {
+                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} (CURP: {r['curp']})": r["id"]
+                for _, r in df_alumnos.iterrows()
+            }
+            sel_eliminar = st.selectbox(
+                "Selecciona el alumno que deseas eliminar:",
+                list(map_eliminar.keys()),
+                key="sb_eliminar_individual",
+            )
+            id_eliminar = map_eliminar[sel_eliminar]
+
+            col_del1, col_del2 = st.columns([2, 1])
+            confirmar_borrado_ind = col_del1.checkbox(
+                f"Confirmar eliminación permanente del registro seleccionado",
+                key="chk_confirmar_borrado_ind",
+            )
+            if col_del2.button("🗑️ ELIMINAR ALUMNO", type="primary") and confirmar_borrado_ind:
+                eliminar_alumno_db(id_eliminar)
+                st.success("✅ Alumno eliminado correctamente de la base de datos.")
+                st.rerun()
+
+        with st.expander("⚠️ Opción Masiva: Vaciar Toda la Base de Datos"):
+            confirmar_vaciar = st.checkbox("Entiendo que esta acción es irreversible y borrará TODOS los registros")
+            if st.button("🗑️ VACIAR BASE DE DATOS COMPLETA") and confirmar_vaciar:
                 vaciar_db()
                 st.success("✅ Base de datos vaciada con éxito.")
                 st.rerun()
@@ -855,7 +887,7 @@ with tab2:
 
         st.markdown("---")
         # ==========================================
-        # SECCIÓN 3: EDITAR COMPLETO EN BBDD
+        # SECCIÓN 4: EDITAR COMPLETO EN BBDD
         # ==========================================
         st.subheader("✏️ Editar Cualquier Campo de un Alumno Registrado")
         if not df_alumnos.empty:
@@ -864,7 +896,7 @@ with tab2:
                 for _, r in df_alumnos.iterrows()
             }
             sel_alumno = st.selectbox(
-                "Selecciona alumno a modificar:", list(opciones.keys())
+                "Selecciona alumno a modificar:", list(opciones.keys()), key="sb_editar_alumno"
             )
             id_sel = opciones[sel_alumno]
             row_sel = df_alumnos[df_alumnos["id"] == id_sel].iloc[0]
