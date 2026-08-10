@@ -13,7 +13,7 @@ import streamlit as st
 # CONFIGURACIÓN INICIAL DE LA PÁGINA
 # ==========================================
 st.set_page_config(
-    page_title="Sistema de Inscripción / Reinscripción 2026",
+    page_title="Sistema de Reinscripción 2026",
     page_icon="📝",
     layout="wide",
 )
@@ -21,7 +21,7 @@ st.set_page_config(
 PASSWORD_ADMIN = st.secrets.get("PASSWORD_ADMIN", "admin123")
 DB_FILE = "inscripciones.db"
 
-# Mapeo de archivos de plantillas según el semestre
+# Mapeo de archivos de plantillas según el semestre (1ER SEMESTRE desactivado temporalmente)
 PLANTILLAS_EXCEL = {
     "1ER SEMESTRE": "SOLIC INSCRIP NVO 2026.xlsx",
     "3ER SEMESTRE": "SOLICITUD REINSCRIPCION tercero.xlsx",
@@ -271,7 +271,7 @@ def generar_excel_alumno(
     docs_list,
 ):
     plantilla_target = PLANTILLAS_EXCEL.get(
-        semestre, PLANTILLAS_EXCEL["1ER SEMESTRE"]
+        semestre, PLANTILLAS_EXCEL["3ER SEMESTRE"]
     )
 
     if not os.path.exists(plantilla_target):
@@ -358,17 +358,8 @@ def generar_excel_alumno(
 
     if semestre == "1ER SEMESTRE":
         cell_docs_map = {
-            "1": "J32",
-            "2": "J33",
-            "3": "J34",
-            "4": "J35",
-            "5": "J36",
-            "6": "J37",
-            "7": "J38",
-            "8": "V32",
-            "9": "V34",
-            "10": "V36",
-            "11": "V37",
+            "1": "J32", "2": "J33", "3": "J34", "4": "J35", "5": "J36",
+            "6": "J37", "7": "J38", "8": "V32", "9": "V34", "10": "V36", "11": "V37",
         }
     else:
         cell_docs_map = {"1": "J32"}
@@ -409,20 +400,37 @@ def generar_excel_alumno(
 # Inicializar base de datos
 inicializar_db()
 
+# MAPEO DE TEXTOS AMIGABLES Y VALORES INTERNOS
+OPCIONES_SEMESTRE_MOSTRAR = [
+    "3er Semestre (2do Año)",
+    "5to Semestre (3er Año)",
+]
+
+MAP_MOSTRAR_A_VALOR = {
+    "3er Semestre (2do Año)": "3ER SEMESTRE",
+    "5to Semestre (3er Año)": "5TO SEMESTRE",
+}
+
+MAP_VALOR_A_MOSTRAR = {
+    "3ER SEMESTRE": "3er Semestre (2do Año)",
+    "5TO SEMESTRE": "5to Semestre (3er Año)",
+}
+
 # ==========================================
 # INTERFAZ Y NAVEGACIÓN DE STREAMLIT
 # ==========================================
-tab1, tab2 = st.tabs(["📝 Formulario de Inscripción", "🔒 Panel Administrador"])
+tab1, tab2 = st.tabs(["📝 Formulario de Reinscripción", "🔒 Panel Administrador"])
 
-# --- TAB 1: FORMULARIO DE INSCRIPCIÓN / REINSCRIPCIÓN ---
+# --- TAB 1: FORMULARIO DE REINSCRIPCIÓN ---
 with tab1:
-    st.title("📝 Solicitud de Inscripción / Reinscripción 2026")
+    st.title("📝 Solicitud de Reinscripción 2026")
 
-    semestre_sel = st.selectbox(
-        "🎓 Selecciona el Semestre al que te inscribes/reinscribes: *",
-        ["1ER SEMESTRE", "3ER SEMESTRE", "5TO SEMESTRE"],
+    semestre_sel_label = st.selectbox(
+        "🎓 Selecciona el Semestre al que te reinscribes: *",
+        OPCIONES_SEMESTRE_MOSTRAR,
         key="f_semestre",
     )
+    semestre_sel = MAP_MOSTRAR_A_VALOR[semestre_sel_label]
 
     st.markdown("---")
     st.header("1. Datos Personales del Alumno")
@@ -437,7 +445,7 @@ with tab1:
         format="DD/MM/YYYY",
         key="f_fnac",
     )
-    edad = col_f2.text_input("Años (Edad): *", placeholder="Ej: 15", key="f_edad")
+    edad = col_f2.text_input("Años (Edad): *", placeholder="Ej: 16", key="f_edad")
 
     lugar_nac = st.text_input("Lugar de Nacimiento: *", key="f_lugarnac")
     sexo = st.radio("Sexo: *", ["FEMENINO", "MASCULINO"], horizontal=True, key="f_sexo")
@@ -454,7 +462,7 @@ with tab1:
 
     secundaria = st.text_input("Secundaria de procedencia: *", key="f_secundaria")
     cct = st.text_input("CCT de la Secundaria: *", key="f_cct")
-    carrera = st.text_input("Aceptado en la Carrera de: *", key="f_carrera")
+    carrera = st.text_input("Carrera: *", key="f_carrera")
 
     col_t1, col_t2 = st.columns(2)
     turno = col_t1.radio(
@@ -599,7 +607,7 @@ with tab1:
                 )
                 guardar_en_db(datos_alumno)
 
-                st.success(f"✅ ¡Solicitud para **{semestre_sel}** guardada correctamente!")
+                st.success(f"✅ ¡Solicitud para **{semestre_sel_label}** guardada correctamente!")
 
                 bytes_excel = generar_excel_alumno(
                     semestre_sel,
@@ -637,7 +645,7 @@ with tab1:
                         c for c in nombre_alumno if c.isalnum() or c == " "
                     ).strip()
                     st.download_button(
-                        label=f"📄 Descargar Solicitud en Excel ({semestre_sel})",
+                        label=f"📄 Descargar Solicitud en Excel ({semestre_sel_label})",
                         data=bytes_excel,
                         file_name=f"SOLICITUD_{semestre_sel.replace(' ', '_')}_{nombre_limpio}_{curp}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -698,7 +706,7 @@ with tab2:
         st.subheader("📋 Cotejo de Documentos Entregados (Control Escolar)")
         if not df_alumnos.empty:
             map_alumnos_docs = {
-                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} - CURP: {r['curp']}": r
+                f"[{MAP_VALOR_A_MOSTRAR.get(r.get('semestre'), r.get('semestre', '3ER SEMESTRE'))}] {r['nombre_alumno']} - CURP: {r['curp']}": r
                 for _, r in df_alumnos.iterrows()
             }
             sel_alum_doc = st.selectbox(
@@ -708,7 +716,7 @@ with tab2:
             )
             r_doc_sel = map_alumnos_docs[sel_alum_doc]
 
-            semestre_alumno = r_doc_sel.get("semestre", "1ER SEMESTRE") or "1ER SEMESTRE"
+            semestre_alumno = r_doc_sel.get("semestre", "3ER SEMESTRE") or "3ER SEMESTRE"
             docs_opciones_target = (
                 DOCS_OPCIONES_1ER
                 if semestre_alumno == "1ER SEMESTRE"
@@ -718,7 +726,8 @@ with tab2:
             docs_actuales_str = str(r_doc_sel["docs_entregados"] or "")
             docs_actuales = [d.strip() for d in docs_actuales_str.split(",") if d.strip()]
 
-            st.write(f"Documentos requeridos para **{semestre_alumno}**:")
+            lbl_sem_actual = MAP_VALOR_A_MOSTRAR.get(semestre_alumno, semestre_alumno)
+            st.write(f"Documentos requeridos para **{lbl_sem_actual}**:")
 
             col_doc_a, col_doc_b = st.columns(2)
             nuevos_docs_seleccionados = []
@@ -750,7 +759,7 @@ with tab2:
         if not df_alumnos.empty:
 
             opciones_alumnos_map = {
-                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} - CURP: {r['curp']}": r
+                f"[{MAP_VALOR_A_MOSTRAR.get(r.get('semestre'), r.get('semestre', '3ER SEMESTRE'))}] {r['nombre_alumno']} - CURP: {r['curp']}": r
                 for _, r in df_alumnos.iterrows()
             }
 
@@ -795,7 +804,7 @@ with tab2:
                             )
 
                             sem_alumno = (
-                                r_al.get("semestre", "1ER SEMESTRE") or "1ER SEMESTRE"
+                                r_al.get("semestre", "3ER SEMESTRE") or "3ER SEMESTRE"
                             )
 
                             bytes_excel_ind = generar_excel_alumno(
@@ -855,7 +864,7 @@ with tab2:
         st.subheader("🗑️ Eliminar un Alumno Específico")
         if not df_alumnos.empty:
             map_eliminar = {
-                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} (CURP: {r['curp']})": r["id"]
+                f"[{MAP_VALOR_A_MOSTRAR.get(r.get('semestre'), r.get('semestre', '3ER SEMESTRE'))}] {r['nombre_alumno']} (CURP: {r['curp']})": r["id"]
                 for _, r in df_alumnos.iterrows()
             }
             sel_eliminar = st.selectbox(
@@ -892,7 +901,7 @@ with tab2:
         st.subheader("✏️ Editar Cualquier Campo de un Alumno Registrado")
         if not df_alumnos.empty:
             opciones = {
-                f"[{r.get('semestre', '1ER SEMESTRE')}] {r['nombre_alumno']} (CURP: {r['curp']})": r["id"]
+                f"[{MAP_VALOR_A_MOSTRAR.get(r.get('semestre'), r.get('semestre', '3ER SEMESTRE'))}] {r['nombre_alumno']} (CURP: {r['curp']})": r["id"]
                 for _, r in df_alumnos.iterrows()
             }
             sel_alumno = st.selectbox(
@@ -905,11 +914,17 @@ with tab2:
                 st.markdown("##### Datos Principales")
                 col_esem, col_e1, col_e2 = st.columns(3)
 
-                opt_semestres = ["1ER SEMESTRE", "3ER SEMESTRE", "5TO SEMESTRE"]
-                val_sem = row_sel.get("semestre", "1ER SEMESTRE") or "1ER SEMESTRE"
-                idx_sem = opt_semestres.index(val_sem) if val_sem in opt_semestres else 0
+                val_sem = row_sel.get("semestre", "3ER SEMESTRE") or "3ER SEMESTRE"
+                lbl_sem_actual = MAP_VALOR_A_MOSTRAR.get(val_sem, OPCIONES_SEMESTRE_MOSTRAR[0])
+                idx_sem = (
+                    OPCIONES_SEMESTRE_MOSTRAR.index(lbl_sem_actual)
+                    if lbl_sem_actual in OPCIONES_SEMESTRE_MOSTRAR
+                    else 0
+                )
 
-                e_semestre = col_esem.selectbox("Semestre:", opt_semestres, index=idx_sem)
+                e_semestre_lbl = col_esem.selectbox("Semestre:", OPCIONES_SEMESTRE_MOSTRAR, index=idx_sem)
+                e_semestre = MAP_MOSTRAR_A_VALOR[e_semestre_lbl]
+
                 e_nombre = col_e1.text_input("Nombre:", value=row_sel["nombre_alumno"])
                 e_curp = col_e2.text_input("CURP:", value=row_sel["curp"])
 
