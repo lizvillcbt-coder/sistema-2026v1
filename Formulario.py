@@ -1,5 +1,6 @@
 import datetime
 import os
+import re
 import sqlite3
 import zipfile
 from io import BytesIO
@@ -48,6 +49,78 @@ DOCS_OPCIONES_REINSCRIPCION = {
 
 
 # ==========================================
+# FUNCIONES DE VALIDACIÓN DE DATOS
+# ==========================================
+def validar_curp(curp):
+    """Valida formato de CURP mexicana (18 caracteres)."""
+    patron_curp = r"^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$"
+    curp_clean = curp.strip().upper()
+    if len(curp_clean) != 18:
+        return False, "La CURP debe tener exactamente 18 caracteres."
+    if not re.match(patron_curp, curp_clean):
+        return False, "El formato de la CURP es inválido."
+    return True, curp_clean
+
+
+def validar_telefono(telefono, nombre_campo, obligatorio=True):
+    """Valida números telefónicos a 10 dígitos."""
+    tel_clean = re.sub(r"\D", "", telefono.strip())
+    if not tel_clean:
+        if obligatorio:
+            return False, f"El campo **{nombre_campo}** es obligatorio.", ""
+        return True, "", ""
+    if len(tel_clean) != 10:
+        return (
+            False,
+            f"El campo **{nombre_campo}** debe tener exactamente 10 dígitos numéricos.",
+            tel_clean,
+        )
+    return True, "", tel_clean
+
+
+def validar_correo(correo, obligatorio=True):
+    """Valida estructura básica de correo electrónico."""
+    correo_clean = correo.strip().lower()
+    if not correo_clean:
+        if obligatorio:
+            return False, "El correo electrónico es obligatorio.", ""
+        return True, "", ""
+    patron_email = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+    if not re.match(patron_email, correo_clean):
+        return False, "El correo electrónico no tiene un formato válido.", correo_clean
+    return True, "", correo_clean
+
+
+def validar_promedio(promedio):
+    """Valida que el promedio esté entre 0 y 10."""
+    prom_str = promedio.strip().replace(",", ".")
+    if not prom_str:
+        return False, "El promedio es obligatorio.", ""
+    try:
+        val = float(prom_str)
+        if 0.0 <= val <= 10.0:
+            return True, "", f"{val:.1f}" if val % 1 != 0 else f"{int(val)}"
+        else:
+            return False, "El promedio debe ser un número entre 0.0 y 10.0.", ""
+    except ValueError:
+        return False, "El promedio debe ser un número válido (ej. 8.5).", ""
+
+
+def validar_edad(edad):
+    """Valida edad numérica."""
+    edad_str = re.sub(r"\D", "", edad.strip())
+    if not edad_str:
+        return False, "La edad es obligatoria.", ""
+    try:
+        val = int(edad_str)
+        if 10 <= val <= 99:
+            return True, "", str(val)
+        return False, "La edad debe estar entre 10 y 99 años.", ""
+    except ValueError:
+        return False, "La edad debe ser un número entero válido.", ""
+
+
+# ==========================================
 # GESTIÓN BASE DE DATOS LOCAL (SQLITE)
 # ==========================================
 @st.cache_resource
@@ -62,7 +135,6 @@ def inicializar_db():
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Se agrega la columna semestre
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS alumnos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,16 +150,14 @@ def inicializar_db():
     """)
     conn.commit()
 
-    # Migración suave en caso de que la tabla ya existiera sin la columna 'semestre'
     try:
         cursor.execute("ALTER TABLE alumnos ADD COLUMN semestre TEXT")
         conn.commit()
     except sqlite3.OperationalError:
-        pass  # Ya existe la columna
+        pass
 
 
 def vaciar_db():
-    """Elimina todos los registros de la tabla de alumnos."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM alumnos")
@@ -131,7 +201,6 @@ def actualizar_en_db(id_alumno, datos):
 
 
 def actualizar_docs_en_db(id_alumno, cadena_docs):
-    """Actualiza únicamente la columna de documentos entregados."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -149,7 +218,6 @@ def obtener_alumnos():
 
 
 def escribir_celda_segura(sheet, celda, valor, alineacion=None, fuente=None):
-    """Escribe en una celda conservando el formato o aplicando nuevos estilos."""
     try:
         cell = sheet[celda]
         cell.value = valor
@@ -194,7 +262,6 @@ def generar_excel_alumno(
     ocupacion,
     docs_list,
 ):
-    """Selecciona la plantilla según el semestre y llena los datos del alumno."""
     plantilla_target = PLANTILLAS_EXCEL.get(
         semestre, PLANTILLAS_EXCEL["1ER SEMESTRE"]
     )
@@ -205,14 +272,12 @@ def generar_excel_alumno(
     wb = openpyxl.load_workbook(plantilla_target)
     sheet = wb.active
 
-    # --- AJUSTES DE IMPRESIÓN ---
     sheet.page_setup.orientation = sheet.ORIENTATION_PORTRAIT
     sheet.page_setup.paperSize = sheet.PAPERSIZE_LETTER
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.page_setup.fitToWidth = 1
     sheet.page_setup.fitToHeight = 1
 
-    # Formatos de texto
     font_arial_10_bold = Font(name="Arial", size=10, bold=True)
     if sheet["D25"].value:
         sheet["D25"].font = font_arial_10_bold
@@ -228,7 +293,6 @@ def generar_excel_alumno(
     escribir_celda_segura(sheet, "U5", edad)
     escribir_celda_segura(sheet, "I8", lugar_nac)
 
-    # --- CELDAS DE SEXO (V8 Y V9) ---
     sexo_clean = str(sexo).strip().upper() if sexo else ""
     if sexo_clean == "FEMENINO":
         escribir_celda_segura(sheet, "V8", "X")
@@ -250,7 +314,6 @@ def generar_excel_alumno(
     elif turno == "VESPERTINO":
         escribir_celda_segura(sheet, "M18", "X")
 
-    # Mapeo de Resultado
     map_estatus = {
         "FOLIO DE ASIGNACIÓN": "D19",
         "ASIGNADO": "D19",
@@ -265,7 +328,6 @@ def generar_excel_alumno(
     escribir_celda_segura(sheet, "G22", nombre_tutor)
     escribir_celda_segura(sheet, "H24", domicilio)
 
-    # --- FILA 26: 2DO DOMICILIO O NOTA POR DEFECTO ---
     if dom_diferente and segundo_domicilio.strip():
         texto_f26 = f"2DO DOMICILIO TUTOR: {segundo_domicilio.strip()}"
         font_f26 = Font(name="Arial", size=8, bold=True)
@@ -286,7 +348,6 @@ def generar_excel_alumno(
     escribir_celda_segura(sheet, "I29", tel_emergencia)
     escribir_celda_segura(sheet, "I30", ocupacion)
 
-    # --- MAPEO DE DOCUMENTOS ENTREGADOS ---
     if semestre == "1ER SEMESTRE":
         cell_docs_map = {
             "1": "J32",
@@ -302,7 +363,6 @@ def generar_excel_alumno(
             "11": "V37",
         }
     else:
-        # En 3ro y 5to de reinscripción solo hay Voucher (Casilla J32)
         cell_docs_map = {"1": "J32"}
 
     for doc_num in docs_list:
@@ -310,21 +370,10 @@ def generar_excel_alumno(
         if doc_num_str in cell_docs_map:
             escribir_celda_segura(sheet, cell_docs_map[doc_num_str], "X")
 
-    # --- FECHA EN FILA 35 (Reinscripciones) o FILA 41/35 (Según plantilla) ---
     hoy = datetime.date.today()
     meses_es = [
-        "ENERO",
-        "FEBRERO",
-        "MARZO",
-        "ABRIL",
-        "MAYO",
-        "JUNIO",
-        "JULIO",
-        "AGOSTO",
-        "SEPTIEMBRE",
-        "OCTUBRE",
-        "NOVIEMBRE",
-        "DICIEMBRE",
+        "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+        "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE"
     ]
     nombre_mes = meses_es[hoy.month - 1]
     texto_fecha_completa = f"COL. NETZAHUALCOYOTL, TEXCOCO, MEXICO. A {hoy.day:02d} DE {nombre_mes} DEL {hoy.year}"
@@ -361,51 +410,50 @@ tab1, tab2 = st.tabs(["📝 Formulario de Inscripción", "🔒 Panel Administrad
 with tab1:
     st.title("📝 Solicitud de Inscripción / Reinscripción 2026")
 
-    # SELECCIÓN DE SEMESTRE AL INICIO
     semestre_sel = st.selectbox(
-        "🎓 Selecciona el Semestre al que te inscribes/reinscribes:",
+        "🎓 Selecciona el Semestre al que te inscribes/reinscribes: *",
         ["1ER SEMESTRE", "3ER SEMESTRE", "5TO SEMESTRE"],
         key="f_semestre",
     )
 
     st.markdown("---")
     st.header("1. Datos Personales del Alumno")
-    nombre_alumno = st.text_input("Nombre completo del Alumno:", key="f_nombre")
+    nombre_alumno = st.text_input("Nombre completo del Alumno: *", key="f_nombre")
 
     col_f1, col_f2 = st.columns([2, 1])
     fecha_nac = col_f1.date_input(
-        "Fecha de Nacimiento:",
+        "Fecha de Nacimiento: *",
         value=datetime.date(2010, 1, 1),
         min_value=datetime.date(1990, 1, 1),
         max_value=datetime.date.today(),
         format="DD/MM/YYYY",
         key="f_fnac",
     )
-    edad = col_f2.text_input("Años (Edad):", key="f_edad")
+    edad = col_f2.text_input("Años (Edad): *", placeholder="Ej: 15", key="f_edad")
 
-    lugar_nac = st.text_input("Lugar de Nacimiento:", key="f_lugarnac")
-    sexo = st.radio("Sexo:", ["FEMENINO", "MASCULINO"], horizontal=True, key="f_sexo")
+    lugar_nac = st.text_input("Lugar de Nacimiento: *", key="f_lugarnac")
+    sexo = st.radio("Sexo: *", ["FEMENINO", "MASCULINO"], horizontal=True, key="f_sexo")
 
     col_c1, col_c2 = st.columns(2)
-    celular_alumno = col_c1.text_input("Celular del Alumno:", key="f_celalumno")
-    correo = col_c2.text_input("Correo electrónico:", key="f_correo")
-    red_social = st.text_input("Red Social:", key="f_redsocial")
+    celular_alumno = col_c1.text_input("Celular del Alumno (10 dígitos): *", placeholder="10 dígitos numéricos", key="f_celalumno")
+    correo = col_c2.text_input("Correo electrónico: *", placeholder="ejemplo@correo.com", key="f_correo")
+    red_social = st.text_input("Red Social (Facebook, Instagram, TikTok):", key="f_redsocial")
 
     st.header("2. Datos Académicos")
     col_a1, col_a2 = st.columns(2)
-    curp = col_a1.text_input("CURP del Alumno:", key="f_curp")
-    promedio = col_a2.text_input("Promedio:", key="f_promedio")
+    curp = col_a1.text_input("CURP del Alumno (18 caracteres): *", placeholder="18 caracteres en mayúsculas", key="f_curp")
+    promedio = col_a2.text_input("Promedio de Secundaria: *", placeholder="Ej. 8.5", key="f_promedio")
 
-    secundaria = st.text_input("Secundaria de procedencia:", key="f_secundaria")
-    cct = st.text_input("CCT de la Secundaria:", key="f_cct")
-    carrera = st.text_input("Aceptado en la Carrera de:", key="f_carrera")
+    secundaria = st.text_input("Secundaria de procedencia: *", key="f_secundaria")
+    cct = st.text_input("CCT de la Secundaria: *", key="f_cct")
+    carrera = st.text_input("Aceptado en la Carrera de: *", key="f_carrera")
 
     col_t1, col_t2 = st.columns(2)
     turno = col_t1.radio(
-        "Turno:", ["MATUTINO", "VESPERTINO"], horizontal=True, key="f_turno"
+        "Turno: *", ["MATUTINO", "VESPERTINO"], horizontal=True, key="f_turno"
     )
     estatus = col_t2.radio(
-        "Resultado:",
+        "Resultado: *",
         ["FOLIO DE ASIGNACIÓN", "CAMBIO", "OTRO RESULTADO", "SIN PROCESO"],
         horizontal=True,
         key="f_estatus",
@@ -413,9 +461,9 @@ with tab1:
     observaciones = st.text_input("Observaciones:", key="f_obs")
 
     st.header("3. Datos del Tutor")
-    nombre_tutor = st.text_input("Nombre completo del Tutor:", key="f_tutor")
+    nombre_tutor = st.text_input("Nombre completo del Tutor: *", key="f_tutor")
     domicilio = st.text_input(
-        "Domicilio Principal del Tutor (Calle, No., Colonia, Localidad, Municipio):",
+        "Domicilio Principal del Tutor (Calle, No., Colonia, Localidad, Municipio): *",
         key="f_domicilio",
     )
 
@@ -439,15 +487,72 @@ with tab1:
     )
 
     col_tut1, col_tut2, col_tut3 = st.columns(3)
-    celular_tutor = col_tut1.text_input("Celular del Tutor:", key="f_celtutor")
-    tel_casa = col_tut2.text_input("Teléfono de Casa:", key="f_telcasa")
-    tel_emergencia = col_tut3.text_input("Teléfono de Emergencia:", key="f_telemerg")
-    ocupacion = st.text_input("Ocupación del Tutor:", key="f_ocupacion")
+    celular_tutor = col_tut1.text_input("Celular del Tutor (10 dígitos): *", placeholder="10 dígitos", key="f_celtutor")
+    tel_casa = col_tut2.text_input("Teléfono de Casa (Opcional):", placeholder="10 dígitos (opcional)", key="f_telcasa")
+    tel_emergencia = col_tut3.text_input("Teléfono de Emergencia (10 dígitos): *", placeholder="10 dígitos", key="f_telemerg")
+    ocupacion = st.text_input("Ocupación del Tutor: *", key="f_ocupacion")
 
     st.markdown("---")
     if st.button("💾 GUARDAR SOLICITUD LOCALMENTE", use_container_width=True, type="primary"):
-        if not nombre_alumno or not curp:
-            st.error("⚠️ Debes llenar al menos el Nombre del Alumno y la CURP.")
+        errores = []
+
+        if not nombre_alumno.strip():
+            errores.append("El **Nombre del Alumno** es obligatorio.")
+        if not lugar_nac.strip():
+            errores.append("El **Lugar de Nacimiento** es obligatorio.")
+        if not secundaria.strip():
+            errores.append("La **Secundaria de procedencia** es obligatoria.")
+        if not cct.strip():
+            errores.append("El **CCT de la Secundaria** es obligatorio.")
+        if not carrera.strip():
+            errores.append("La **Carrera** es obligatoria.")
+        if not nombre_tutor.strip():
+            errores.append("El **Nombre del Tutor** es obligatorio.")
+        if not domicilio.strip():
+            errores.append("El **Domicilio del Tutor** es obligatorio.")
+        if dom_dif_check and not segundo_domicilio.strip():
+            errores.append("Indicó que el domicilio es diferente pero no especificó el **2do domicilio**.")
+        if not ocupacion.strip():
+            errores.append("La **Ocupación del Tutor** es obligatoria.")
+
+        curp_ok, msg_curp = validar_curp(curp)
+        if not curp_ok:
+            errores.append(msg_curp)
+        else:
+            curp = msg_curp
+
+        edad_ok, msg_edad, edad_val = validar_edad(edad)
+        if not edad_ok:
+            errores.append(msg_edad)
+
+        prom_ok, msg_prom, prom_val = validar_promedio(promedio)
+        if not prom_ok:
+            errores.append(msg_prom)
+
+        mail_ok, msg_mail, mail_val = validar_correo(correo)
+        if not mail_ok:
+            errores.append(msg_mail)
+
+        cel_a_ok, msg_cel_a, cel_a_val = validar_telefono(celular_alumno, "Celular del Alumno")
+        if not cel_a_ok:
+            errores.append(msg_cel_a)
+
+        cel_t_ok, msg_cel_t, cel_t_val = validar_telefono(celular_tutor, "Celular del Tutor")
+        if not cel_t_ok:
+            errores.append(msg_cel_t)
+
+        tel_c_ok, msg_tel_c, tel_c_val = validar_telefono(tel_casa, "Teléfono de Casa", obligatorio=False)
+        if not tel_c_ok:
+            errores.append(msg_tel_c)
+
+        tel_e_ok, msg_tel_e, tel_e_val = validar_telefono(tel_emergencia, "Teléfono de Emergencia")
+        if not tel_e_ok:
+            errores.append(msg_tel_e)
+
+        if errores:
+            st.error("⚠️ **Corrige los siguientes errores antes de continuar:**")
+            for err in errores:
+                st.write(f"- {err}")
         else:
             try:
                 dia_nac = f"{fecha_nac.day:02d}"
@@ -458,66 +563,64 @@ with tab1:
 
                 datos_alumno = (
                     semestre_sel,
-                    nombre_alumno,
+                    nombre_alumno.strip().upper(),
                     curp,
                     f"{dia_nac}/{mes_nac}/{anio_nac}",
-                    edad,
+                    edad_val,
                     sexo,
-                    lugar_nac,
-                    celular_alumno,
-                    correo,
-                    red_social,
-                    secundaria,
-                    cct,
-                    promedio,
-                    carrera,
+                    lugar_nac.strip().upper(),
+                    cel_a_val,
+                    mail_val,
+                    red_social.strip(),
+                    secundaria.strip().upper(),
+                    cct.strip().upper(),
+                    prom_val,
+                    carrera.strip().upper(),
                     turno,
                     estatus,
-                    observaciones,
-                    nombre_tutor,
-                    domicilio,
+                    observaciones.strip(),
+                    nombre_tutor.strip().upper(),
+                    domicilio.strip().upper(),
                     1 if dom_dif_check else 0,
-                    segundo_domicilio,
-                    celular_tutor,
-                    tel_casa,
-                    tel_emergencia,
-                    ocupacion,
+                    segundo_domicilio.strip().upper(),
+                    cel_t_val,
+                    tel_c_val,
+                    tel_e_val,
+                    ocupacion.strip().upper(),
                     lista_docs_vacia,
                 )
                 guardar_en_db(datos_alumno)
 
-                st.success(
-                    f"✅ ¡Solicitud para **{semestre_sel}** guardada correctamente!"
-                )
+                st.success(f"✅ ¡Solicitud para **{semestre_sel}** guardada correctamente!")
 
                 bytes_excel = generar_excel_alumno(
                     semestre_sel,
-                    nombre_alumno,
+                    nombre_alumno.strip().upper(),
                     dia_nac,
                     mes_nac,
                     anio_nac,
-                    edad,
-                    lugar_nac,
+                    edad_val,
+                    lugar_nac.strip().upper(),
                     sexo,
-                    celular_alumno,
-                    correo,
-                    red_social,
+                    cel_a_val,
+                    mail_val,
+                    red_social.strip(),
                     curp,
-                    secundaria,
-                    cct,
-                    promedio,
-                    carrera,
+                    secundaria.strip().upper(),
+                    cct.strip().upper(),
+                    prom_val,
+                    carrera.strip().upper(),
                     turno,
                     estatus,
-                    observaciones,
-                    nombre_tutor,
-                    domicilio,
+                    observaciones.strip(),
+                    nombre_tutor.strip().upper(),
+                    domicilio.strip().upper(),
                     dom_dif_check,
-                    segundo_domicilio,
-                    celular_tutor,
-                    tel_casa,
-                    tel_emergencia,
-                    ocupacion,
+                    segundo_domicilio.strip().upper(),
+                    cel_t_val,
+                    tel_c_val,
+                    tel_e_val,
+                    ocupacion.strip().upper(),
                     [],
                 )
 
@@ -533,9 +636,9 @@ with tab1:
                     )
 
             except sqlite3.IntegrityError:
-                st.error(f"⚠️ La CURP **{curp}** ya se encuentra registrada.")
+                st.error(f"⚠️ La CURP **{curp}** ya se encuentra registrada en el sistema.")
             except Exception as e:
-                st.error(f"Error al guardar la solicitud: {e}")
+                st.error(f"Error inesperado al guardar la solicitud: {e}")
 
 # --- TAB 2: PANEL ADMINISTRADOR ---
 with tab2:
@@ -544,12 +647,8 @@ with tab2:
 
     if pass_input == PASSWORD_ADMIN:
 
-        with st.expander(
-            "📤 Cargar / Reemplazar Base de Datos (.db)", expanded=False
-        ):
-            uploaded_db = st.file_uploader(
-                "Selecciona un archivo .db local:", type=["db"]
-            )
+        with st.expander("📤 Cargar / Reemplazar Base de Datos (.db)", expanded=False):
+            uploaded_db = st.file_uploader("Selecciona un archivo .db local:", type=["db"])
             if uploaded_db is not None:
                 if st.button("🔄 Cargar esta Base de Datos ahora"):
                     with open(DB_FILE, "wb") as f:
@@ -566,9 +665,7 @@ with tab2:
 
         output_excel = BytesIO()
         with pd.ExcelWriter(output_excel, engine="openpyxl") as writer:
-            df_alumnos.to_excel(
-                writer, index=False, sheet_name="Padrón Completo"
-            )
+            df_alumnos.to_excel(writer, index=False, sheet_name="Padrón Completo")
 
         col_d1.download_button(
             label="📥 Exportar Padrón Completo (.xlsx)",
@@ -639,7 +736,7 @@ with tab2:
 
         st.markdown("---")
         # ==========================================
-        # SECCIÓN 2: DESCARGA MULTIPLE EN EXCEL (.ZIP)
+        # SECCIÓN 2: DESCARGA MULTIPLE EN EXCEL AGUPADA POR SEMESTRE (.ZIP)
         # ==========================================
         st.subheader("📦 Descarga Masiva o Individual de Solicitudes en Excel")
         if not df_alumnos.empty:
@@ -670,9 +767,7 @@ with tab2:
                 if col_dl.button("📦 Generar Paquete ZIP con Excels"):
                     zip_buffer = BytesIO()
 
-                    with zipfile.ZipFile(
-                        zip_buffer, "w", zipfile.ZIP_DEFLATED
-                    ) as zip_file:
+                    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
                         for etq in seleccionados:
                             r_al = opciones_alumnos_map[etq]
 
@@ -730,17 +825,20 @@ with tab2:
                                 nom_clean = "".join(
                                     c for c in r_al["nombre_alumno"] if c.isalnum() or c == " "
                                 ).strip()
-                                nombre_archivo_excel = f"SOLICITUD_{sem_alumno.replace(' ', '_')}_{nom_clean}_{r_al['curp']}.xlsx"
-                                zip_file.writestr(
-                                    nombre_archivo_excel, bytes_excel_ind
-                                )
+                                # Nombre de archivo indivual
+                                nom_archivo = f"SOLICITUD_{sem_alumno.replace(' ', '_')}_{nom_clean}_{r_al['curp']}.xlsx"
+                                
+                                # Ruta dentro del ZIP agrupada en carpeta por semestre
+                                ruta_dentro_zip = f"{sem_alumno}/{nom_archivo}"
+                                
+                                zip_file.writestr(ruta_dentro_zip, bytes_excel_ind)
 
                     zip_buffer.seek(0)
 
                     st.download_button(
-                        label="⬇️ DESCARGAR ARCHIVO ZIP DE SOLICITUDES",
+                        label="⬇️ DESCARGAR ARCHIVO ZIP (AGRUPADO POR SEMESTRE)",
                         data=zip_buffer.getvalue(),
-                        file_name=f"SOLICITUDES_EXCEL_{datetime.date.today().strftime('%Y%m%d')}.zip",
+                        file_name=f"SOLICITUDES_POR_SEMESTRE_{datetime.date.today().strftime('%Y%m%d')}.zip",
                         mime="application/zip",
                         use_container_width=True,
                     )
@@ -774,11 +872,11 @@ with tab2:
             with st.form("form_edit_admin_completo"):
                 st.markdown("##### Datos Principales")
                 col_esem, col_e1, col_e2 = st.columns(3)
-                
+
                 opt_semestres = ["1ER SEMESTRE", "3ER SEMESTRE", "5TO SEMESTRE"]
                 val_sem = row_sel.get("semestre", "1ER SEMESTRE") or "1ER SEMESTRE"
                 idx_sem = opt_semestres.index(val_sem) if val_sem in opt_semestres else 0
-                
+
                 e_semestre = col_esem.selectbox("Semestre:", opt_semestres, index=idx_sem)
                 e_nombre = col_e1.text_input("Nombre:", value=row_sel["nombre_alumno"])
                 e_curp = col_e2.text_input("CURP:", value=row_sel["curp"])
@@ -881,7 +979,7 @@ with tab2:
                 e_tel_casa = col_et4.text_input(
                     "Tel. Casa:", value=str(row_sel["tel_casa"] or "")
                 )
-                e_tel_emerg = col_et6.text_input(
+                e_tel_emerg = col_et5.text_input(
                     "Tel. Emergencia:",
                     value=str(row_sel["tel_emergencia"] or ""),
                 )
@@ -901,30 +999,30 @@ with tab2:
             if btn_actualizar_todo:
                 datos_actualizados = (
                     e_semestre,
-                    e_nombre,
-                    e_curp,
+                    e_nombre.strip().upper(),
+                    e_curp.strip().upper(),
                     e_fnac,
                     e_edad,
                     e_sexo,
-                    e_lugar_nac,
+                    e_lugar_nac.strip().upper(),
                     e_cel_alum,
-                    e_correo,
+                    e_correo.strip().lower(),
                     e_red_social,
-                    e_secundaria,
-                    e_cct,
+                    e_secundaria.strip().upper(),
+                    e_cct.strip().upper(),
                     e_promedio,
-                    e_carrera,
+                    e_carrera.strip().upper(),
                     e_turno,
                     e_estatus,
                     e_obs,
-                    e_tutor,
-                    e_domicilio,
+                    e_tutor.strip().upper(),
+                    e_domicilio.strip().upper(),
                     1 if e_dom_dif else 0,
-                    e_seg_dom,
+                    e_seg_dom.strip().upper(),
                     e_cel_tut,
                     e_tel_casa,
                     e_tel_emerg,
-                    e_ocupacion,
+                    e_ocupacion.strip().upper(),
                     e_docs,
                 )
                 actualizar_en_db(id_sel, datos_actualizados)
