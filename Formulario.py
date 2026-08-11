@@ -18,7 +18,7 @@ st.set_page_config(
     layout="wide",
 )
 
-PASSWORD_ADMIN = st.secrets.get("PASSWORD_ADMIN", "admin123")
+PASSWORD_ADMIN = st.secrets.get("PASSWORD_ADMIN", "a274250")
 DB_FILE = "inscripciones.db"
 
 # Mapeo de archivos de plantillas según el semestre (1ER SEMESTRE desactivado temporalmente)
@@ -402,6 +402,7 @@ inicializar_db()
 
 # MAPEO DE TEXTOS AMIGABLES Y VALORES INTERNOS
 OPCIONES_SEMESTRE_MOSTRAR = [
+    "1er Semestre (1er Año)",
     "3er Semestre (2do Año)",
     "5to Semestre (3er Año)",
 ]
