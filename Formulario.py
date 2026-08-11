@@ -408,11 +408,13 @@ OPCIONES_SEMESTRE_MOSTRAR = [
 ]
 
 MAP_MOSTRAR_A_VALOR = {
+    "1er Semestre (1er Año)": "1ER SEMESTRE",
     "3er Semestre (2do Año)": "3ER SEMESTRE",
     "5to Semestre (3er Año)": "5TO SEMESTRE",
 }
 
 MAP_VALOR_A_MOSTRAR = {
+    "1ER SEMESTRE": "1er Semestre (1er Año)",
     "3ER SEMESTRE": "3er Semestre (2do Año)",
     "5TO SEMESTRE": "5to Semestre (3er Año)",
 }
