@@ -18,7 +18,7 @@ st.set_page_config(
     layout="wide",
 )
 
-PASSWORD_ADMIN = st.secrets.get("PASSWORD_ADMIN", "a274250")
+PASSWORD_ADMIN = st.secrets.get("PASSWORD_ADMIN", "admin123")
 DB_FILE = "inscripciones.db"
 
 # Mapeo de archivos de plantillas según el semestre (1ER SEMESTRE desactivado temporalmente)
@@ -27,6 +27,13 @@ PLANTILLAS_EXCEL = {
     "3ER SEMESTRE": "SOLICITUD REINSCRIPCION tercero.xlsx",
     "5TO SEMESTRE": "SOLICITUD REINSCRIPCION quinto.xlsx",
 }
+
+# OPCIONES FIJAS PARA CARRERA
+OPCIONES_CARRERA = [
+    "TÉCNICO EN TURISMO",
+    "TÉCNICO EN ADMINISTRACIÓN",
+    "TÉCNICO EN INFORMÁTICA",
+]
 
 # DICCIONARIOS DE DOCUMENTOS SEGÚN EL SEMESTRE
 DOCS_OPCIONES_1ER = {
@@ -402,19 +409,16 @@ inicializar_db()
 
 # MAPEO DE TEXTOS AMIGABLES Y VALORES INTERNOS
 OPCIONES_SEMESTRE_MOSTRAR = [
-    "1er Semestre (1er Año)",
     "3er Semestre (2do Año)",
     "5to Semestre (3er Año)",
 ]
 
 MAP_MOSTRAR_A_VALOR = {
-    "1er Semestre (1er Año)": "1ER SEMESTRE",
     "3er Semestre (2do Año)": "3ER SEMESTRE",
     "5to Semestre (3er Año)": "5TO SEMESTRE",
 }
 
 MAP_VALOR_A_MOSTRAR = {
-    "1ER SEMESTRE": "1er Semestre (1er Año)",
     "3ER SEMESTRE": "3er Semestre (2do Año)",
     "5TO SEMESTRE": "5to Semestre (3er Año)",
 }
@@ -437,7 +441,14 @@ with tab1:
 
     st.markdown("---")
     st.header("1. Datos Personales del Alumno")
-    nombre_alumno = st.text_input("Nombre completo del Alumno: *", key="f_nombre")
+    
+    # Campo con la indicación clara para el nombre
+    nombre_alumno = st.text_input(
+        "Nombre completo del Alumno (Empezando por Apellido Paterno, Materno y Nombre/s): *",
+        placeholder="Ej: PÉREZ LÓPEZ JUAN MANUEL",
+        help="Por favor escribe primero tu Apellido Paterno, luego tu Apellido Materno y finalmente tu(s) Nombre(s).",
+        key="f_nombre",
+    )
 
     col_f1, col_f2 = st.columns([2, 1])
     fecha_nac = col_f1.date_input(
@@ -465,7 +476,13 @@ with tab1:
 
     secundaria = st.text_input("Secundaria de procedencia: *", key="f_secundaria")
     cct = st.text_input("CCT de la Secundaria: *", key="f_cct")
-    carrera = st.text_input("Carrera: *", key="f_carrera")
+
+    # Selección desplegable para la Carrera
+    carrera = st.selectbox(
+        "Carrera: *",
+        OPCIONES_CARRERA,
+        key="f_carrera",
+    )
 
     col_t1, col_t2 = st.columns(2)
     turno = col_t1.radio(
@@ -480,7 +497,11 @@ with tab1:
     observaciones = st.text_input("Observaciones:", key="f_obs")
 
     st.header("3. Datos del Tutor")
-    nombre_tutor = st.text_input("Nombre completo del Tutor: *", key="f_tutor")
+    nombre_tutor = st.text_input(
+        "Nombre completo del Tutor (Empezando por Apellido Paterno, Materno y Nombre/s): *",
+        placeholder="Ej: PÉREZ GARCÍA MARÍA DEL CARMEN",
+        key="f_tutor",
+    )
     domicilio = st.text_input(
         "Domicilio Principal del Tutor (Calle, No., Colonia, Localidad, Municipio): *",
         key="f_domicilio",
@@ -523,8 +544,6 @@ with tab1:
             errores.append("La **Secundaria de procedencia** es obligatoria.")
         if not cct.strip():
             errores.append("El **CCT de la Secundaria** es obligatorio.")
-        if not carrera.strip():
-            errores.append("La **Carrera** es obligatoria.")
         if not nombre_tutor.strip():
             errores.append("El **Nombre del Tutor** es obligatorio.")
         if not domicilio.strip():
@@ -928,7 +947,7 @@ with tab2:
                 e_semestre_lbl = col_esem.selectbox("Semestre:", OPCIONES_SEMESTRE_MOSTRAR, index=idx_sem)
                 e_semestre = MAP_MOSTRAR_A_VALOR[e_semestre_lbl]
 
-                e_nombre = col_e1.text_input("Nombre:", value=row_sel["nombre_alumno"])
+                e_nombre = col_e1.text_input("Nombre (Ap. Paterno Materno Nombre):", value=row_sel["nombre_alumno"])
                 e_curp = col_e2.text_input("CURP:", value=row_sel["curp"])
 
                 col_e3, col_e4, col_e5 = st.columns(3)
@@ -971,9 +990,14 @@ with tab2:
                 )
 
                 col_ea4, col_ea5, col_ea6 = st.columns(3)
-                e_carrera = col_ea4.text_input(
-                    "Carrera:", value=str(row_sel["carrera"] or "")
+                
+                carrera_val = str(row_sel["carrera"] or "").upper()
+                idx_carrera = (
+                    OPCIONES_CARRERA.index(carrera_val)
+                    if carrera_val in OPCIONES_CARRERA
+                    else 0
                 )
+                e_carrera = col_ea4.selectbox("Carrera:", OPCIONES_CARRERA, index=idx_carrera)
 
                 opt_turno = ["MATUTINO", "VESPERTINO"]
                 idx_turno = (
